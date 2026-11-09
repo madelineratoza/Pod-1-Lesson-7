@@ -1,0 +1,632 @@
+---
+title: "Data Visualization, Continued"
+subtitle: "ReproRehab · Intro to R · Pod 1"
+author: "Madeline Ratoza, PT, DPT, PhD"
+format:
+  html:
+    toc: true
+    code-fold: show
+    theme: flatly
+    embed-resources: true
+engine: knitr
+---
+
+```{r}
+#| label: setup
+#| include: false
+# Run once in the R console if you need these packages:
+# install.packages(c("rmarkdown", "ggplot2", "dplyr", "tidyr"))
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+knitr::opts_chunk$set(
+  fig.width = 8, fig.height = 4.3, dpi = 120,
+  out.width = "100%", fig.align = "center", message = FALSE
+)
+```
+
+::: {.callout-tip appearance="simple" icon="false"}
+## R as a powerful language for data visualization.
+
+Today we will spend some time appreciating the diversity and beauty of R visuals. Then you will work on building a view visuals yourself. 
+
+I hope this lesson inspires you to create visuals in R for your next class assignment, publication, or work product! 
+:::
+
+Keep the [plotting cheat sheet](#plotting-cheat-sheet) handy as you work through the lesson.
+
+## 1. The R visualization gallery
+
+What stands out in each visual?
+
+### 01 · See how a distribution shifts
+
+A ridgeline plot stacks distributions on the same horizontal scale. These simulated walking speeds come from three visits. Follow the peaks from the bottom ridge to the top.
+
+```{r}
+#| label: walking-ridgelines
+#| echo: false
+#| fig-height: 4.8
+#| fig-alt: "Three overlapping ridges shift toward faster walking speeds from baseline to week six, with wide overlap."
+set.seed(421)
+starting_speed <- rnorm(80, mean = 0.69, sd = 0.13)
+ridge_visits <- c("Baseline", "Week 3", "Week 6")
+visit_speeds <- list(
+  starting_speed,
+  starting_speed + rnorm(80, mean = 0.09, sd = 0.06),
+  starting_speed + rnorm(80, mean = 0.18, sd = 0.09)
+)
+
+ridge_data <- bind_rows(lapply(seq_along(ridge_visits), function(i) {
+  curve <- density(visit_speeds[[i]], bw = 0.055, from = 0.25, to = 1.35)
+  tibble(speed = curve$x, height = curve$y, visit = ridge_visits[i], row = i)
+}))
+ridge_data <- ridge_data |>
+  mutate(visit = factor(visit, levels = ridge_visits),
+         top = row + 1.22 * height / max(height))
+
+ggplot(ridge_data, aes(speed, group = visit)) +
+  geom_hline(yintercept = 1:3, color = "#34516A", linewidth = 0.35) +
+  geom_ribbon(aes(ymin = row, ymax = top, fill = visit), alpha = 0.86) +
+  geom_line(aes(y = top, color = visit), linewidth = 0.8) +
+  scale_fill_manual(values = c("#A78BFA", "#30C6C2", "#FFAA77"), guide = "none") +
+  scale_color_manual(values = c("#DACBFF", "#8FF6EE", "#FFD8BF"), guide = "none") +
+  scale_y_continuous(breaks = 1:3, labels = ridge_visits,
+                     expand = expansion(mult = c(0.05, 0.06))) +
+  labs(title = "The whole distribution moves",
+       subtitle = "Walking speeds shift toward the right across three visits",
+       x = "Comfortable walking speed (m/s)", y = NULL,
+       caption = "Simulated rehabilitation data · Curves show estimated distributions") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.background = element_rect(fill = "#13243C", color = NA),
+    plot.margin = margin(16, 20, 13, 18),
+    plot.title = element_text(color = "#FFFFFF", face = "bold", size = 21),
+    plot.subtitle = element_text(color = "#D4E0ED"),
+    plot.caption = element_text(color = "#D4E0ED"),
+    axis.title.x = element_text(color = "#D4E0ED"),
+    axis.text = element_text(color = "#D4E0ED"),
+    panel.grid.major.x = element_line(color = "#34516A", linewidth = 0.3),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+**Look closer.** Where do the ridges still overlap? Could you tell from this figure whether the same person improved? Graphs like this are fully customizable down to the the color codes and can be updated simply by changing a line of code. 
+
+### 02 · Make a multivariable pattern visible
+
+Imagine a dataset with several measures of access. **Principal component analysis (PCA)** summarizes variation across those measures into a smaller set of patterns called components. The first component captures the largest share of variation it can in a single summary. This plot shows which access measures are most closely related to that component and in which direction.
+
+This plot uses **simulated community data**. Each dot shows how strongly a measure is associated with the first component. Its position left or right of zero shows the direction. Measures on the same side help describe that component in the same direction.
+
+```{r}
+#| label: pca-demo
+#| echo: false
+#| fig-alt: "Four dots show drive time and travel burden on the positive side of zero, and provider supply and clinic availability on the negative side."
+set.seed(172)
+access_barrier <- rnorm(40)
+access_measures <- data.frame(
+  "Drive time" = 40 + 9 * access_barrier + rnorm(40, sd = 4),
+  "Travel burden" = 50 + 8 * access_barrier + rnorm(40, sd = 6),
+  "Provider supply" = 20 - 4 * access_barrier + rnorm(40, sd = 2),
+  "Clinic availability" = 15 - 3 * access_barrier + rnorm(40, sd = 4),
+  check.names = FALSE
+)
+access_pca <- prcomp(access_measures, scale. = TRUE)
+# Orient PC1 so higher values point toward longer drive times.
+pc1 <- access_pca$x[, 1] * sign(access_pca$rotation["Drive time", 1])
+pc1_correlations <- data.frame(
+  measure = names(access_measures),
+  correlation = as.numeric(cor(access_measures, pc1))
+)
+pc1_percent <- 100 * access_pca$sdev[1]^2 / sum(access_pca$sdev^2)
+
+ggplot(pc1_correlations, aes(correlation, reorder(measure, correlation))) +
+  geom_vline(xintercept = 0, color = "#7E8DA1", linewidth = 0.55) +
+  geom_segment(aes(x = 0, xend = correlation,
+                   yend = reorder(measure, correlation), color = correlation > 0),
+               linewidth = 1.5, alpha = 0.55) +
+  geom_point(aes(color = correlation > 0), size = 5, show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%+.2f", correlation), color = correlation > 0),
+            nudge_y = 0.26, size = 3.5, fontface = "bold") +
+  scale_color_manual(values = c("#147A85", "#A94615"), guide = "none") +
+  scale_x_continuous(breaks = seq(-1, 1, 0.5), limits = c(-1.12, 1.12)) +
+  scale_y_discrete(expand = expansion(add = c(0.45, 0.6))) +
+  labs(title = "Four measures, one access pattern",
+       subtitle = sprintf("PC1 captures %.0f%% of variation in the simulated measures",
+                          pc1_percent),
+       x = "Correlation with the first component", y = NULL,
+       caption = "Simulated community data") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.background = element_rect(fill = "#F2F6FA", color = NA),
+    plot.margin = margin(15, 21, 13, 15),
+    plot.title = element_text(face = "bold", size = 20, color = "#142843"),
+    plot.subtitle = element_text(color = "#395571"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+**Discuss.** How might a graphic like this be easier or more difficult to create in code vs. a point-and-click interface? Are there any areas of your research where creating visuals like this might be helpful? 
+
+### 03 · Turn a table into something you can scan
+
+Each tile shows the percentage of appointments booked at a **fictional outpatient clinic**. Scan the color first, then read the numbers.
+
+```{r}
+#| label: clinic-heatmap
+#| echo: false
+#| fig-height: 4.2
+#| fig-alt: "A labeled heatmap of fictional bookings shows a Tuesday through Thursday peak from 10 to noon, with Friday afternoon among the least booked times."
+weekdays <- c("Mon", "Tue", "Wed", "Thu", "Fri")
+time_blocks <- c("8–10 a.m.", "10 a.m.–noon", "Noon–2 p.m.", "2–4 p.m.")
+clinic_slots <- data.frame(
+  day = factor(rep(weekdays, times = 4), levels = weekdays),
+  time = factor(rep(time_blocks, each = 5), levels = rev(time_blocks)),
+  booked = c(56, 72, 74, 68, 49,
+             81, 97, 94, 91, 70,
+             61, 79, 83, 80, 53,
+             64, 77, 71, 67, 38)
+)
+
+ggplot(clinic_slots, aes(day, time)) +
+  geom_tile(aes(fill = booked), color = "white", linewidth = 1.6) +
+  geom_text(aes(label = paste0(booked, "%"), color = booked >= 70),
+            fontface = "bold", size = 4.6) +
+  scale_fill_gradient(low = "#E6F4F2", high = "#08545C",
+                      limits = c(35, 100), guide = "none") +
+  scale_color_manual(values = c("#102F38", "white"), guide = "none") +
+  scale_x_discrete(position = "top") +
+  labs(title = "When is the clinic busiest?",
+       subtitle = "Share of appointment slots booked, by day and time",
+       x = NULL, y = NULL, caption = "Fictional outpatient clinic") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 20, color = "#142843"),
+    plot.subtitle = element_text(color = "#395571"),
+    plot.margin = margin(15, 15, 10, 15),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(face = "bold")
+  )
+```
+
+**Discuss.** This type of chart is similar to conditional formatting in excel. Similarly, you can change the color scheme and conditions that lead to each level of shading; however, you can now do so in a few lines of code. 
+
+### 04 · Tell a story with an annotated timeline
+
+An annotation can point readers to a meaningful event. Here, the shaded period marks when a fictional clinic introduced appointment reminders. The lines show monthly follow-up completion at two sites.
+
+```{r}
+#| label: follow-up-timeline
+#| echo: false
+#| fig-height: 4.5
+#| fig-alt: "Follow-up completion rises at both fictional clinics, with the reminder rollout marked in April."
+followup_trends <- tibble(
+  month = rep(1:6, times = 2),
+  site = rep(c("North clinic", "South clinic"), each = 6),
+  completion = c(65, 69, 67, 76, 82, 87, 78, 77, 80, 81, 83, 84)
+)
+end_labels <- filter(followup_trends, month == 6) |>
+  mutate(label_y = if_else(site == "North clinic", completion + 3, completion - 3))
+
+ggplot(followup_trends, aes(month, completion, color = site)) +
+  annotate("rect", xmin = 3.75, xmax = 4.25, ymin = 57, ymax = 98,
+           fill = "#FADBA5", alpha = 0.55) +
+  annotate("text", x = 4, y = 96, label = "Reminders introduced",
+           color = "#684619", size = 3.5, fontface = "bold") +
+  geom_line(linewidth = 1.35) +
+  geom_point(size = 3) +
+  geom_segment(data = end_labels,
+               aes(xend = 6.13, yend = label_y), linewidth = 0.45) +
+  geom_text(data = end_labels, aes(x = 6.18, y = label_y, label = site),
+            hjust = 0, size = 3.45, fontface = "bold") +
+  scale_color_manual(values = c("North clinic" = "#6B45BE",
+                                "South clinic" = "#087D80"), guide = "none") +
+  scale_x_continuous(breaks = 1:6, labels = month.abb[1:6],
+                     limits = c(0.8, 7.35), expand = expansion(mult = 0)) +
+  scale_y_continuous(breaks = seq(60, 90, 10), labels = function(x) paste0(x, "%"),
+                     limits = c(57, 98)) +
+  labs(title = "Follow-up completion rose at both clinics",
+       subtitle = "Monthly share of scheduled follow-ups completed",
+       x = NULL, y = NULL, caption = "Simulated clinic data") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.background = element_rect(fill = "#FBF8F2", color = NA),
+    plot.margin = margin(16, 20, 13, 18),
+    plot.title = element_text(color = "#172D46", face = "bold", size = 20),
+    plot.subtitle = element_text(color = "#43576B"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+**Look closer.** What did the annotation help you notice? Is there an element of your own research where an annotation like this might support data visualization and data storytelling? 
+
+### 05 · Show the estimate and its uncertainty
+
+A dot-and-interval plot gives the estimate and its precision equal space. These invented estimates compare two rehabilitation programs on three outcomes. All differences are oriented so a positive number favors Program A.
+
+```{r}
+#| label: outcome-intervals
+#| echo: false
+#| fig-height: 4.3
+#| fig-alt: "Three standardized estimates with illustrative 95% confidence intervals. Only the walking speed interval stays entirely to the right of zero."
+outcomes <- tibble(
+  outcome = factor(c("Walking speed", "Balance confidence", "Walking endurance"),
+                   levels = c("Walking endurance", "Balance confidence", "Walking speed")),
+  estimate = c(0.46, 0.27, 0.14),
+  lower = c(0.18, -0.14, -0.29),
+  upper = c(0.74, 0.68, 0.57)
+)
+
+ggplot(outcomes, aes(estimate, outcome)) +
+  annotate("rect", xmin = 0, xmax = 0.9, ymin = -Inf, ymax = Inf,
+           fill = "#E8F6EF") +
+  geom_vline(xintercept = 0, color = "#657689", linewidth = 0.6,
+             linetype = "dashed") +
+  geom_segment(aes(x = lower, xend = upper, yend = outcome, color = outcome),
+               linewidth = 1.6, lineend = "round") +
+  geom_point(aes(fill = outcome), shape = 21, size = 5, stroke = 0.85,
+             color = "white") +
+  scale_color_manual(values = c("#4773AD", "#7E57B1", "#087D75"), guide = "none") +
+  scale_fill_manual(values = c("#4773AD", "#7E57B1", "#087D75"), guide = "none") +
+  scale_x_continuous(limits = c(-0.5, 0.9), breaks = c(-0.4, 0, 0.4, 0.8)) +
+  labs(title = "How precise are the differences?",
+       subtitle = "Dots show estimates. Lines show illustrative 95% confidence intervals.",
+       x = "Standardized difference (Program A minus Program B)", y = NULL,
+       caption = "Invented results · Shaded area favors Program A") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.background = element_rect(fill = "#F4F7FB", color = NA),
+    plot.margin = margin(16, 20, 13, 18),
+    plot.title = element_text(color = "#172D46", face = "bold", size = 20),
+    plot.subtitle = element_text(color = "#43576B"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+**Look closer.** In this visual, we can shade the graph to the right of zero differently than less than zero. How might this help your visualization? What are the limitations to this type of addition? 
+
+### From gallery to tutorial
+
+Every visual starts by deciding what a row represents and which columns should control position, color, or labels. Then we layer marks. You’ll try two versions of that idea: **tiles plus labels** for a heatmap and **points plus lines** for individual change.
+
+**Today’s question:** Who changed during outpatient stroke rehabilitation, by how much, and what does the group average hide?
+
+By the end, you can reshape repeated measurements for plotting, connect measurements from the same participant, and choose between two views of change.
+
+
+## 2. Try it | Build the clinic heatmap
+
+Create a new .RMD file in R studio to create these visuals on your own. We will give you the complete code, and then you an work through ways of changing the visuals by modifying parts of the code. 
+
+```{r}
+#| label: heatmap-tiles
+#| fig-alt: "A heatmap with darker tiles for appointment blocks with higher booking percentages."
+library(ggplot2)
+
+weekdays <- c("Mon", "Tue", "Wed", "Thu", "Fri")
+time_blocks <- c("8–10 a.m.", "10 a.m.–noon", "Noon–2 p.m.", "2–4 p.m.")
+
+# Create one row per weekday and time block.
+clinic_slots <- data.frame(
+  day = factor(rep(weekdays, times = 4), levels = weekdays),
+  time = factor(rep(time_blocks, each = 5), levels = rev(time_blocks)),
+  booked = c(
+    56, 72, 74, 68, 49,
+    81, 97, 94, 91, 70,
+    61, 79, 83, 80, 53,
+    64, 77, 71, 67, 38
+  )
+)
+
+# Draw one tile per row. Darker tiles show higher booking percentages.
+ggplot(clinic_slots, aes(x = day, y = time)) +
+  geom_tile(aes(fill = booked)) +
+  scale_fill_gradient(low = "#E6F4F2", high = "#08545C")
+```
+
+**Your turn.** Try it on your own | Restyle the heatmap
+
+**Copy your heatmap into a new R code chunk. Change one thing at a time, then rerun the chunk to see what changed.**
+
+1. Change the colors. In scale_fill_gradient(), low is the color for lower booking percentages and high is the color for higher ones. Try "#EDE9FE" and "#5B21B6" for a light-to-dark purple palette.
+
+2. Separate the tiles. Add color = "white" inside geom_tile(). This gives each tile a white border. Try changing linewidth to see how the border thickness changes.
+
+3. Change the overall style. Try theme_minimal() or theme_classic(). Then give your plot a title that tells readers what they’re looking at.
+
+::: {.callout-tip collapse="true"}
+## Reveal one example
+
+```r
+ggplot(clinic_slots, aes(x = day, y = time)) +
+  # White borders separate the tiles.
+  geom_tile(aes(fill = booked), color = "white", linewidth = 0.8) +
+  # Swap these hex codes to try a different palette.
+  scale_fill_gradient(low = "#EDE9FE", high = "#5B21B6") +
+  labs(
+    title = "When is the clinic busiest?",
+    x = "Day of the week",
+    y = "Time block",
+    fill = "Booked (%)"
+  ) +
+  # Try theme_classic() here and compare the result.
+  theme_minimal()
+```
+
+:::
+
+## 3. Try it | Follow individual change
+
+The practice data represent **24 fictional adults in outpatient stroke rehabilitation**. Each person has a baseline and a week-six comfortable walking speed. For this exercise, a positive change means a faster measured walking speed. The two fictional groups give us a reason to practice comparing panels.
+
+```{r}
+#| label: practice-data
+stroke_walk <- data.frame(
+  participant_id = sprintf("S%02d", 1:24),
+  program = rep(c("Treadmill practice", "Overground practice"), each = 12),
+  baseline_mps = c(
+    0.46, 0.51, 0.62, 0.68, 0.71, 0.78, 0.82, 0.86, 0.92, 1.01, 1.06, 1.12,
+    0.43, 0.54, 0.58, 0.65, 0.73, 0.76, 0.81, 0.89, 0.95, 0.99, 1.08, 1.15
+  ),
+  week6_mps = c(
+    0.70, 0.65, 0.78, 0.66, 0.90, 0.92, 0.82, 0.98, 0.96, 1.16, 1.03, 1.20,
+    0.51, 0.76, 0.58, 0.72, 0.69, 0.98, 0.90, 0.82, 1.08, 1.03, 1.10, 1.17
+  )
+)
+
+head(stroke_walk)
+```
+
+Each row is one participant. The last two columns contain walking speed in meters per second (m/s). **Predict:** If the average walking speed goes up, what could still happen to an individual participant’s speed?
+
+## 4. Build the paired plot
+
+### Reshape the data
+
+Recall `pivot_longer()` from [Lesson 5](https://reed441.github.io/Pod1Lesson5/). We’ll put the two visits in one column so they can share the x-axis. Check the first few rows to see the same ID appear twice.
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+stroke_long <- stroke_walk |>
+  pivot_longer(
+    cols = c(baseline_mps, week6_mps),
+    names_to = "visit",
+    values_to = "walking_speed"
+  ) |>
+  mutate(visit = factor(
+    visit,
+    levels = c("baseline_mps", "week6_mps"),
+    labels = c("Baseline", "Week 6")
+  ))
+
+head(stroke_long)
+```
+
+### Start with a familiar boxplot
+
+```{r}
+#| label: boxplot
+#| fig-alt: "Boxplots show the distributions of walking speed at baseline and week six."
+ggplot(stroke_long, aes(x = visit, y = walking_speed)) +
+  geom_boxplot(fill = "#D8E8F3", width = 0.45) +
+  labs(title = "How did the distribution of walking speed shift?",
+       x = NULL, y = "Walking speed (m/s)") +
+  theme_minimal(base_size = 13)
+```
+
+**Ask:** Can you tell how the participant who started slowest did at week six?
+
+### Connect measurements from the same participant
+
+Run the points plot first. Then run the second chunk to see what connecting the points adds.
+
+```{r}
+#| label: points
+#| fig-alt: "Individual walking speed measurements at the two visits, with no connections between participants' paired scores."
+walking_plot <- ggplot(stroke_long, aes(x = visit, y = walking_speed))
+
+walking_plot +
+  geom_point(alpha = 0.65)
+```
+
+```{r}
+#| label: paired
+#| fig-alt: "Lines connect each participant’s baseline and week-six walking speeds. Most slope upward, and some are flat or slope downward."
+paired_plot <- walking_plot +
+  geom_line(aes(group = participant_id), color = "#287C83", alpha = 0.6) +
+  geom_point(color = "#18575D", size = 2, alpha = 0.8) +
+  labs(title = "How did walking speed change for each participant?",
+       subtitle = "Each line connects one participant’s two measurements",
+       x = NULL, y = "Walking speed (m/s)") +
+  theme_minimal(base_size = 13)
+
+paired_plot
+```
+
+In `geom_line()`, `group = participant_id` tells R which points belong to the same line. Find one upward line, one downward line, and one flat line. What does each mean?
+
+## 5. Give each program its own panel
+
+Use `facet_wrap()` to make one panel per program. Both panels use the same scale, so a change of 0.10 m/s looks equally large in either panel.
+
+```{r}
+#| label: facets
+#| fig-alt: "Two panels show individual changes in walking speed for overground and treadmill practice, using the same vertical scale."
+paired_plot +
+  facet_wrap(~ program)
+```
+
+**Try it.** Change `alpha` on the lines to 0.2, then to 1. Which version makes the overlapping lines easier to read? Share one observation about the individual changes you see. Keep the interpretation descriptive because the data were constructed for practice.
+
+## 6. Optional extension | Put change on the x-axis
+
+Use the original, wide dataset. Calculate change as week-six speed minus baseline speed. Plot one dot per participant and add a vertical line at zero. The faint jitter separates dots vertically within each program while keeping their x-values exact.
+
+Replace the first `...` with the subtraction and the second with the reference value. Then run the chunk in RStudio. The starter chunk uses `eval: false`, so run it directly in RStudio after filling in the blanks.
+
+```{r}
+#| label: change-exercise
+#| eval: false
+library(dplyr)
+library(ggplot2)
+
+stroke_change <- stroke_walk |>
+  mutate(change_mps = week6_mps - baseline_mps)
+
+ggplot(stroke_change, aes(x = change_mps, y = program)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  geom_jitter(
+    width = 0, height = 0.12, size = 2.5,
+    color = "#18575D", alpha = 0.8
+  ) +
+  labs(
+    title = "Who walked faster at week six?",
+    x = "Change in walking speed (m/s)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+**Read your plot.** What does a dot to the left of zero mean? Which plot helps you spot the largest change? Which plot helps you see where that participant started?
+
+<details>
+<summary>Show the worked solution</summary>
+
+```{r}
+#| label: change-solution
+#| fig-alt: "Change scores spread to either side of zero for both programs, with more dots to the right."
+stroke_change <- stroke_walk |>
+  mutate(change_mps = week6_mps - baseline_mps)
+
+ggplot(stroke_change, aes(x = change_mps, y = program)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  geom_jitter(width = 0, height = 0.12, size = 2.5,
+              color = "#18575D", alpha = 0.8) +
+  labs(title = "Who walked faster at week six?",
+       x = "Change in walking speed (m/s)", y = NULL) +
+  theme_minimal(base_size = 13)
+```
+
+A dot to the left of zero means the participant walked more slowly at week six. The change plot makes the largest gains and declines easy to spot. The paired plot also shows starting and ending speeds.
+
+</details>
+
+## 7. Wrap-up
+
+Choose the paired plot or the change-score plot for a rehab research presentation. Write a one-sentence caption that names the time points, explains what a mark represents, and describes one pattern you see.
+
+**If you finish early:** Try using baseline speed on the x-axis and change on the y-axis. Add a horizontal line at zero. What question does that view help you ask?
+
+## 8. Plotting cheat sheet {#plotting-cheat-sheet}
+
+Use these cues when you know what you want the plot to do and need the R code for it.
+
+### What does that word mean?
+
+| Term | Meaning | Code cue |
+|---|---|---|
+| **Aesthetic** | A visual property such as position, color, or size. Use `aes()` to connect a data column to a visual property. | `aes(x = visit, y = walking_speed)` |
+| **Geom** | The kind of mark you draw. A plot can combine several geoms as layers. | `geom_point()`, `geom_line()`, `geom_tile()` |
+| **Grouping** | Which rows belong together when drawing a line or other grouped mark. | `geom_line(aes(group = participant_id))` |
+| **Scale** | How data values translate to axis ticks, colors, or sizes. | `scale_y_continuous(breaks = seq(0.4, 1.4, 0.2))` |
+| **Facet** | A separate panel for each value of a grouping variable. | `facet_wrap(~ program)` |
+| **Theme** | The appearance of text, grids, backgrounds, and other parts around the data. | `theme_minimal(base_size = 13)` |
+
+### Pick a color
+
+Copy a hex code, including the `#`, and put it in quotes. `color` controls lines and most points. `fill` controls the inside of shapes such as tiles and bars.
+
+```{r}
+#| label: cheat-sheet-colors
+#| echo: false
+#| fig-height: 2.7
+#| fig-alt: "Eight color swatches with copyable hex codes listed in the text below."
+swatches <- tibble(
+  x = rep(1:4, times = 2),
+  y = rep(c(2, 1), each = 4),
+  name = c("Teal", "Blue", "Plum", "Clay", "Mint", "Sky", "Lilac", "Sand"),
+  hex = c("#087D80", "#3869A7", "#6B45BE", "#A94615",
+          "#BDEDE5", "#D8E8F3", "#E5D9FA", "#FADBA5"),
+  ink = rep(c("white", "#172D46"), each = 4)
+)
+
+ggplot(swatches, aes(x, y)) +
+  geom_tile(aes(fill = hex), width = 0.93, height = 0.85) +
+  geom_text(aes(label = paste(name, hex, sep = "\n"), color = ink),
+            size = 4, lineheight = 0.95) +
+  scale_fill_identity() +
+  scale_color_identity() +
+  theme_void()
+```
+
+**Copy a code:** Teal `#087D80` · Blue `#3869A7` · Plum `#6B45BE` · Clay `#A94615` · Mint `#BDEDE5` · Sky `#D8E8F3` · Lilac `#E5D9FA` · Sand `#FADBA5`
+
+**Set one color** by putting it outside `aes()`. **Color by a data column** by putting that column inside `aes()`.
+
+```r
+# All points use the same teal.
+walking_plot + geom_point(color = "#087D80", size = 2, alpha = 0.75)
+
+# Each program gets a color and a legend.
+walking_plot +
+  geom_point(aes(color = program)) +
+  scale_color_manual(values = c("#087D80", "#6B45BE"))
+```
+
+### Make the axes or figure bigger
+
+| If you want to… | Change this |
+|---|---|
+| Show a wider range of values on a numeric axis | Use `coord_cartesian(xlim = c(low, high))` or `coord_cartesian(ylim = c(low, high))`. This changes the view without dropping observations before calculations. |
+| Choose which numbers appear on an axis | Use `scale_x_continuous(breaks = ...)` or `scale_y_continuous(breaks = ...)`. |
+| Add breathing room around categories like Baseline and Week 6 | Use `scale_x_discrete(expand = expansion(add = 0.8))`. |
+| Make the whole figure physically wider or taller in Quarto | Set the chunk's figure width and height in inches. |
+
+For example, add these two lines at the top of an R code chunk:
+
+```r
+#| fig-width: 9
+#| fig-height: 5
+```
+
+Here’s a wider **y-axis range** with ticks every 0.2 m/s. The x-axis stays categorical because it shows named visits.
+
+```r
+paired_plot +
+  coord_cartesian(ylim = c(0.3, 1.4)) +
+  scale_y_continuous(breaks = seq(0.4, 1.4, by = 0.2))
+```
+
+For a **numeric x-axis**, try this after running the optional change-score exercise or its solution.
+
+```r
+ggplot(stroke_change, aes(x = change_mps, y = program)) +
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  coord_cartesian(xlim = c(-0.20, 0.30)) +
+  scale_x_continuous(breaks = seq(-0.20, 0.30, by = 0.10))
+```
+
+### Quick finishing touches
+
+| To change… | Add or edit… |
+|---|---|
+| Title or axis labels | `labs(title = "Walking speed over time", x = "Visit", y = "Speed (m/s)")` |
+| Point size | `geom_point(size = 3)` |
+| Line thickness | `geom_line(linewidth = 1.2)` |
+| Transparency | `alpha = 0.35` inside the layer. Zero is invisible and one is fully opaque. |
+| A zero or threshold line | `geom_hline(yintercept = 0)` or `geom_vline(xintercept = 0)` |
+| Separate panels by program | `facet_wrap(~ program)` |
+
+---
+
+**Happy Visualizing!**
+
